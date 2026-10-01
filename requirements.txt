@@ -1,0 +1,4 @@
+# Reproducible ETL dependencies for the project's Python 3.14 virtual environment.
+pandas==3.0.6
+openpyxl==3.1.5
+psycopg[binary]==3.3.6
