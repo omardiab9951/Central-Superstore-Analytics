@@ -192,3 +192,29 @@ In `DimProduct`, the natural-key uniqueness is composite `(ProductID, ProductNam
 - **Physical schema:** actual types, nullability, primary keys, foreign keys, unique constraints, and check constraints match [data_dictionary.md](data_dictionary.md) and `sql/01_create_database.sql` through `sql/04_constraints.sql`.
 - **Source workbook:** read-only checks only; it was not modified.
 - **Audit evidence:** catalog and rerun results are recorded in [audit_phases_1_to_5.md](audit_phases_1_to_5.md).
+
+## Phase 8 Reporting Views
+
+Views are saved, read-only SELECT definitions that present reusable reporting results; they do not store a second copy of the facts. The definitions are in [10_views.sql](../sql/10_views.sql). The five physical tables and their relationships remain unchanged.
+
+| View | Grain (one row represents) | Intended use |
+|---|---|---|
+| `vw_sales_detail` | One `FactSales` line (`SalesKey`) | Flattened row-level reporting joined to all dimensions; both date roles are named explicitly. |
+| `vw_order_summary` | One `OrderID` | Order totals, line count, and order-to-ship delay. |
+| `vw_monthly_kpis` | One order year/month | Monthly sales, profit, margin, quantity, order count, and order-level average order value. |
+| `vw_customer_kpis` | One active `CustomerKey` | Customer sales/profit, distinct order activity, order-level AOV, first/last order dates, and value tier. |
+| `vw_product_performance` | One `ProductKey` | Product-member performance; multiple names for one ProductID stay separate. |
+| `vw_category_region_profitability` | One Region/State/Category combination | Geographic/category totals and negative-profit-line share. |
+
+Monthly and customer average order value is calculated by first using `vw_order_summary`, so each order is weighted once rather than once per product line. These views are presentation layers only; Phase 8 creates no procedures or indexes.
+
+## Phase 9 KPI Routines
+
+Phase 9 adds reusable database routines in [11_stored_procedures.sql](../sql/11_stored_procedures.sql); these are routines, not new tables or views.
+
+| Routine | Kind | Input / output grain | Purpose |
+|---|---|---|---|
+| `warehouse.sp_calculate_kpis` | PostgreSQL procedure | One KPI result for a date range and optional category/region filters | Returns overall sales, profit, margin, quantity, distinct order/customer counts, order-level AOV, and loss-line count through OUT parameters. |
+| `warehouse.fn_kpi_by_period` | PostgreSQL table-valued function | One row per requested year, quarter, or month | Returns the same filtered KPI measures by time period for table-style reporting. |
+
+Both routines use Order Date for date filtering, keep NULL date bounds open-ended, treat NULL category/region as no filter, and aggregate line facts to order grain before calculating AOV. See [stored_procedures_phase9.md](stored_procedures_phase9.md) for parameter behavior and validation.

@@ -1,6 +1,6 @@
 # Mini-Project 2 — Central Superstore Data Warehouse
 
-This project profiles `Central_Superstore.xlsx`, loads the `Central_Region` sheet into a PostgreSQL star schema, validates the warehouse, and provides core and advanced read-only business queries. The implemented scope ends at Phase 7; views, procedures, indexes, and later reporting remain future work.
+This project profiles `Central_Superstore.xlsx`, loads the `Central_Region` sheet into a PostgreSQL star schema, validates the warehouse, provides core and advanced read-only business queries, defines KPI reporting views/routines, and documents measured query optimization. The implemented scope ends at Phase 10; business analytics reporting remains future work.
 
 ## Requirements
 
@@ -19,7 +19,7 @@ localhost:5432:*:postgres:<your-local-password>
 
 Replace the placeholder locally with your own password. Do not commit `pgpass.conf`, paste a real password into project files, or put one on a command line. Restrict access to the local file to your Windows account.
 
-## Setup and Run Order (Phases 1–7)
+## Setup and Run Order (Phases 1–10)
 
 Run these commands from the project root in PowerShell. The pinned Python dependencies were installed and the ETL was run from a fresh virtual environment during the Phase 1–5 audit.
 
@@ -51,9 +51,43 @@ $psql = Join-Path $pgBin 'psql.exe'
 
 # Phase 7: run the 12 read-only advanced SQL queries.
 & $psql -h localhost -p 5432 -U postgres -d central_superstore_dw -v ON_ERROR_STOP=1 -P pager=off -f sql\09_advanced_sql.sql
+
+# Phase 8: create or replace the six reporting views.
+& $psql -h localhost -p 5432 -U postgres -d central_superstore_dw -v ON_ERROR_STOP=1 -f sql\10_views.sql
+
+# Phase 9: create or replace the KPI procedure and period function.
+& $psql -h localhost -p 5432 -U postgres -d central_superstore_dw -v ON_ERROR_STOP=1 -f sql\11_stored_procedures.sql
+
+# Phase 10: create or replace justified fact foreign-key indexes.
+& $psql -h localhost -p 5432 -U postgres -d central_superstore_dw -v ON_ERROR_STOP=1 -f sql\12_indexes.sql
+
+# Refresh planner statistics, then measure the documented representative queries.
+& $psql -h localhost -p 5432 -U postgres -d central_superstore_dw -v ON_ERROR_STOP=1 -c 'ANALYZE warehouse."FactSales"; ANALYZE warehouse."DimDate"; ANALYZE warehouse."DimCustomer"; ANALYZE warehouse."DimProduct"; ANALYZE warehouse."DimLocation";'
+.\.venv\Scripts\python.exe scripts\benchmark_phase10.py --database central_superstore_dw --runs 5
 ```
 
-The Phase 6 file [sql/08_business_queries.sql](sql/08_business_queries.sql) contains 20 read-only core business queries. The Phase 7 file [sql/09_advanced_sql.sql](sql/09_advanced_sql.sql) contains 12 advanced read-only queries demonstrating CTEs, window functions, correlated subqueries, and analytical techniques. Neither file changes database state. Explanations, actual PostgreSQL samples, and pandas verification are documented in [docs/queries_phase6.md](docs/queries_phase6.md) and [docs/queries_phase7.md](docs/queries_phase7.md).
+The Phase 6 file [sql/08_business_queries.sql](sql/08_business_queries.sql) contains 20 read-only core business queries. The Phase 7 file [sql/09_advanced_sql.sql](sql/09_advanced_sql.sql) contains 12 advanced read-only queries demonstrating CTEs, window functions, correlated subqueries, and analytical techniques. Phase 8's [sql/10_views.sql](sql/10_views.sql) creates or replaces six reporting views. Phase 9's [sql/11_stored_procedures.sql](sql/11_stored_procedures.sql) creates or replaces a KPI procedure and a table-valued period function; neither routine modifies data.
+
+Example Phase 9 procedure call for the full source date range, with no category or region filter (pass NULL placeholders for the OUT values):
+
+```sql
+CALL warehouse.sp_calculate_kpis(
+    '2013-01-03', '2016-12-30', NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+);
+```
+
+Example monthly KPI query:
+
+```sql
+SELECT *
+FROM warehouse.fn_kpi_by_period('2013-01-03', '2016-12-30', 'month', NULL, NULL)
+ORDER BY period_start;
+```
+
+NULL date bounds are open-ended; NULL category/region means all values. Full parameter, output, and verification details are in [docs/stored_procedures_phase9.md](docs/stored_procedures_phase9.md), with the plan-compatible [docs/stored_procedure.md](docs/stored_procedure.md) pointer.
+
+Phase 10 index definitions are re-runnable and documented in [docs/optimization_phase10.md](docs/optimization_phase10.md). The read-only benchmark helper [scripts/benchmark_phase10.py](scripts/benchmark_phase10.py) accepts `--database` and runs five `EXPLAIN (ANALYZE, BUFFERS)` trials for its representative workloads. Scale tests must use a disposable clone, never the live warehouse.
 
 The plan's Phase 5 filename `sql/07_data_validation.sql` is also available as a `psql` include of the maintained `05_validation.sql` checks.
 
@@ -61,7 +95,7 @@ The plan's Phase 5 filename `sql/07_data_validation.sql` is also available as a 
 
 Phase 2 design is documented before the SQL files are run. `sql/02_create_dimensions.sql` drops and recreates the warehouse tables; keep any rebuild testing isolated from data you need.
 
-## Current Project Structure (Phases 1–7)
+## Current Project Structure (Phases 1–10)
 
 ```text
 Mini_Project_2/
@@ -79,9 +113,14 @@ Mini_Project_2/
 |   |-- validation_report.md
 |   |-- queries_phase6.md
 |   |-- queries_phase7.md
+|   |-- views_phase8.md
+|   |-- stored_procedure.md
+|   |-- stored_procedures_phase9.md
+|   |-- optimization_phase10.md
 |   |-- audit_phases_1_to_5.md
 |-- scripts/
 |   |-- profile_dataset.py
+|   |-- benchmark_phase10.py
 |-- etl/
 |   |-- load_warehouse.py
 |   |-- reconcile_with_excel.py
@@ -94,4 +133,7 @@ Mini_Project_2/
     |-- 07_data_validation.sql  (plan-compatible include)
     |-- 08_business_queries.sql
     |-- 09_advanced_sql.sql
+    |-- 10_views.sql
+    |-- 11_stored_procedures.sql
+    |-- 12_indexes.sql
 ```
