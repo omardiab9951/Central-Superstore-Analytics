@@ -3,7 +3,11 @@
 -- This file creates structure only; it does not insert or load any rows.
 
 \set ON_ERROR_STOP on
-\connect central_superstore_dw
+\if :{?warehouse_db}
+\else
+\set warehouse_db central_superstore_dw
+\endif
+\connect :warehouse_db
 
 -- FactSales depends on the dimensions, so remove it before removing dimensions.
 -- This also makes a full rerun of the ordered scripts safe.
@@ -22,7 +26,9 @@ CREATE TABLE warehouse."DimDate" (
     "Month" SMALLINT NOT NULL,
     "MonthName" VARCHAR(12) NOT NULL,
     "Day" SMALLINT NOT NULL,
-    "DayOfWeek" VARCHAR(12) NOT NULL
+    "DayOfWeek" VARCHAR(12) NOT NULL,
+    -- A true value marks Saturday or Sunday for simple weekend reporting.
+    "IsWeekend" BOOLEAN NOT NULL
 );
 
 -- CustomerKey is a warehouse-generated identifier; CustomerID is the source key.

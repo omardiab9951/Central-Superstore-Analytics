@@ -3,7 +3,11 @@
 -- Existing named constraints are dropped first so this file is safe to rerun.
 
 \set ON_ERROR_STOP on
-\connect central_superstore_dw
+\if :{?warehouse_db}
+\else
+\set warehouse_db central_superstore_dw
+\endif
+\connect :warehouse_db
 
 -- Dimension natural keys prevent duplicate descriptive members.
 ALTER TABLE warehouse."DimCustomer"

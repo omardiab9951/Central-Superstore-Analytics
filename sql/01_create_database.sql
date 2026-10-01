@@ -4,16 +4,22 @@
 
 \set ON_ERROR_STOP on
 
+-- A psql variable can select a disposable test database; otherwise use the project database.
+\if :{?warehouse_db}
+\else
+\set warehouse_db central_superstore_dw
+\endif
+
 -- Create the warehouse database only when it does not already exist.
-SELECT 'CREATE DATABASE central_superstore_dw'
+SELECT format('CREATE DATABASE %I', :'warehouse_db')
 WHERE NOT EXISTS (
     SELECT 1
     FROM pg_database
-    WHERE datname = 'central_superstore_dw'
+    WHERE datname = :'warehouse_db'
 )\gexec
 
 -- Switch this psql session to the project database before creating its schema.
-\connect central_superstore_dw
+\connect :warehouse_db
 
 -- Keep the project's tables together in a clearly named PostgreSQL schema.
 CREATE SCHEMA IF NOT EXISTS warehouse;

@@ -41,6 +41,7 @@ One row per calendar day from 2013-01-03 through 2017-01-05 inclusive, covering 
 | `MonthName` | `VARCHAR(12)` | Calendar month name. | Derived attribute | Derived from `FullDate` |
 | `Day` | `SMALLINT` | Day of month. | Derived attribute | Derived from `FullDate` |
 | `DayOfWeek` | `VARCHAR(12)` | Weekday name. | Derived attribute | Derived from `FullDate` |
+| `IsWeekend` | `BOOLEAN` | True for Saturday or Sunday; false for Monday through Friday. | Derived attribute | Derived from `FullDate` |
 
 The same `DateKey` is referenced by `FactSales.OrderDateKey` and `FactSales.ShipDateKey`; these foreign keys describe different date roles.
 

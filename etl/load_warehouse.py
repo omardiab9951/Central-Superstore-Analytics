@@ -371,6 +371,7 @@ def load_transaction(
     dimensions: tuple[pd.DataFrame, ...],
     fact: pd.DataFrame,
     raw_source_totals: dict[str, Decimal | int],
+    database_name: str = DATABASE_NAME,
 ) -> dict[str, Any]:
     """Clear and reload all warehouse tables in one all-or-nothing transaction."""
     dim_date, dim_customer, dim_product, dim_location = dimensions
@@ -378,23 +379,13 @@ def load_transaction(
         "host": "localhost",
         "port": 5432,
         "user": "postgres",
-        "dbname": DATABASE_NAME,
+        "dbname": database_name,
         "connect_timeout": 10,
         "application_name": "central_superstore_phase4_etl",
     }
     # libpq reads the existing pgpass.conf file; no password is stored in this project.
     with psycopg.connect(**connection_settings) as connection:
         with connection.cursor() as cursor:
-            # Phase 4 requests weekend reporting; add this derived date attribute atomically.
-            cursor.execute(
-                'ALTER TABLE warehouse."DimDate" '
-                'ADD COLUMN IF NOT EXISTS "IsWeekend" BOOLEAN NOT NULL DEFAULT FALSE'
-            )
-            cursor.execute(
-                'COMMENT ON COLUMN warehouse."DimDate"."IsWeekend" '
-                "IS 'True when FullDate falls on Saturday or Sunday'"
-            )
-
             # Truncate the fact and all referenced dimensions in one statement.
             # PostgreSQL requires every table linked by these foreign keys to be named together.
             cursor.execute(
@@ -514,12 +505,18 @@ def validate_loaded_data(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Read-only extract and transactional load for the Superstore warehouse.")
     parser.add_argument("--workbook", type=Path, help="Optional explicit path to Central_Superstore.xlsx")
+    parser.add_argument(
+        "--database",
+        default=DATABASE_NAME,
+        help="Target database (defaults to the project warehouse; useful for isolated rebuild tests).",
+    )
     args = parser.parse_args()
     workbook_path = args.workbook.resolve() if args.workbook else find_workbook()
     if not workbook_path.is_file():
         raise FileNotFoundError(workbook_path)
 
     print(f"Source workbook: {workbook_path}")
+    print(f"Target database: {args.database}")
     source, cleaning_log, source_hash, raw_source_totals = clean_source(workbook_path)
     print(f"Extracted: {len(source):,} rows x {len(source.columns)} columns from {SHEET_NAME}")
     print(f"Source SHA-256 (read-only check): {source_hash}")
@@ -537,7 +534,7 @@ def main() -> None:
         print(f"  - {name}: {len(frame):,}")
     print(f"  - FactSales: {len(fact):,}")
 
-    results = load_transaction(source, dimensions, fact, raw_source_totals)
+    results = load_transaction(source, dimensions, fact, raw_source_totals, args.database)
     print("Post-load validation:")
     for table, expected in results["expected_counts"].items():
         actual = results["actual_counts"][table]

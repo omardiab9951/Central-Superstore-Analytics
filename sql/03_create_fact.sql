@@ -3,7 +3,11 @@
 -- No source or test data is inserted by this script.
 
 \set ON_ERROR_STOP on
-\connect central_superstore_dw
+\if :{?warehouse_db}
+\else
+\set warehouse_db central_superstore_dw
+\endif
+\connect :warehouse_db
 
 -- Remove an earlier fact table before recreating it for an ordered rerun.
 DROP TABLE IF EXISTS warehouse."FactSales";

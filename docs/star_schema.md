@@ -63,7 +63,7 @@ This is a deliberate source-preserving compromise. In a strict normalized catalo
 
 ### `DimDate`
 
-Use one calendar-day row per `FullDate`. The profile gives an order-date range of **2013-01-03 through 2016-12-30** and a ship-date range of **2013-01-07 through 2017-01-05**. Generate the calendar dimension for the inclusive union of those ranges: **2013-01-03 through 2017-01-05**. This ensures every order and ship date has a matching date row and allows later date attributes such as year, quarter, month, and day to be used consistently.
+Use one calendar-day row per `FullDate`. The profile gives an order-date range of **2013-01-03 through 2016-12-30** and a ship-date range of **2013-01-07 through 2017-01-05**. Generate the calendar dimension for the inclusive union of those ranges: **2013-01-03 through 2017-01-05**. This ensures every order and ship date has a matching date row and allows date attributes such as year, quarter, month, day, weekday, and weekend status to be used consistently.
 
 `FullDate` is the natural key. `DateKey` is a deterministic calendar key represented as `YYYYMMDD` (for example, 20130103), not an arbitrary sequence. `OrderDateKey` and `ShipDateKey` in the fact each reference `DimDate.DateKey` but represent different roles.
 
@@ -99,7 +99,7 @@ The **first normal form (1NF)** idea is that each cell stores one value rather t
 |---|---|
 | `DimCustomer` | One row per `CustomerID`; the profile verifies one name and one segment per ID. Customer descriptions therefore have a clear business-key dependency. The surrogate `CustomerKey` provides a stable warehouse PK. |
 | `DimProduct` | One row per exact `(ProductID, ProductName)` member because 16 product IDs have multiple source names. Category and sub-category are consistent per ID in the profile. This preserves facts without inventing a canonical name, but repeated category labels across name variants are an intentional dimensional denormalization. A strict catalog normalization should wait for authoritative product-name resolution. |
-| `DimDate` | One row per calendar date. Year, quarter, month, month name, day, and weekday are derived from `FullDate`, so no independently maintained date label is needed. |
+| `DimDate` | One row per calendar date. Year, quarter, month, month name, day, weekday, and weekend flag are derived from `FullDate`, so no independently maintained date label is needed. |
 | `DimLocation` | One row per observed `(Country, State, City, PostalCode)` tuple. The full tuple distinguishes locations; country and region are constant in this extract and retained for scope/context. |
 | `FactSales` | Measures and transaction-level attributes are stored at the declared line grain. Dimension descriptions are not copied into the fact; dimension foreign keys provide that context. `OrderID` and `SourceRowID` remain in the fact for order analysis and lineage. |
 
@@ -139,6 +139,7 @@ erDiagram
         string MonthName
         smallint Day
         string DayOfWeek
+        boolean IsWeekend
     }
     DimLocation {
         int LocationKey PK
@@ -173,6 +174,7 @@ In `DimProduct`, the natural-key uniqueness is composite `(ProductID, ProductNam
 - The observed `(Order ID, Product ID)` pair is unique in this snapshot, but do not depend on it as the only fact-row identity in future exports.
 - Treat exact `(ProductID, ProductName)` source pairs as separate product-dimension members until an authoritative rule resolves the 16 conflicting IDs and the trailing whitespace.
 - Treat one calendar day as one `DimDate` row and include every date from 2013-01-03 through 2017-01-05 inclusive.
+- Derive `IsWeekend` from `FullDate`: Saturday and Sunday are true; Monday through Friday are false.
 - Treat `(Country, State, City, PostalCode)` as the location natural key; postal code alone is only verified as unique for this supplied extract.
 - Keep `ShipMode` in the fact table unless a later source supplies additional shipping-mode descriptions or attributes.
 - Keep `Country` and `Region` in `DimLocation` even though each is constant in this extract, so the 21 source columns are accounted for.

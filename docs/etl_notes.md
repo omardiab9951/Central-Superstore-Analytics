@@ -12,7 +12,7 @@ The runnable implementation is [load_warehouse.py](../etl/load_warehouse.py). De
 2. Text fields are trimmed at the beginning and end. Dates become calendar dates, postal codes stay text, and numeric measures become decimal numbers at the precision supported by the approved PostgreSQL columns.
 3. The script builds one row per natural key in each dimension and generates the date calendar from the earliest order date through the latest ship date, including every day in between.
 4. It looks up the dimension surrogate keys for every source row. The `ProductID` and cleaned `ProductName` pair is used for product lookup, preserving different names for the same product ID as separate members.
-5. One PostgreSQL transaction adds the requested weekend attribute if needed, clears the old rows, bulk-copies all dimensions and facts, and validates counts, foreign keys, calendar continuity, and totals before committing. If any operation or validation fails, PostgreSQL rolls the transaction back.
+5. One PostgreSQL transaction clears the old rows, bulk-copies all dimensions and facts, and validates counts, foreign keys, calendar continuity, and totals before committing. `DimDate.IsWeekend` is defined by `sql/02_create_dimensions.sql`; ETL only supplies its values. If any operation or validation fails, PostgreSQL rolls the transaction back.
 6. PostgreSQL `COPY` is used for batch transfer rather than issuing one insert per row.
 
 ## Extract and Cleaning Log
@@ -50,14 +50,14 @@ Surrogate keys are generated deterministically for the three identity-key dimens
 - Four source text cells had a trailing space in one product-name value; trimming those exact outer spaces makes the label consistent while keeping genuinely different product names distinct.
 - The source has 741 negative-profit lines; these are retained as losses.
 - Phase 1 found no missing cells, duplicate full rows, invalid quantities, non-positive sales, discount values outside 0 to 1, or ship dates before order dates. The ETL checks the critical constraints again and stops rather than loading invalid rows.
-- `DimDate.IsWeekend` was not present in the Phase 2 dictionary or Phase 3 table, while Phase 4 explicitly requested a weekend flag as a date attribute. The ETL adds `IsWeekend BOOLEAN NOT NULL DEFAULT FALSE` with `ALTER TABLE IF NOT EXISTS` inside the same load transaction, then populates Saturday/Sunday flags. This is the only schema extension made during Phase 4; no new table or relationship was introduced.
+- `DimDate.IsWeekend` was requested in Phase 4 but initially omitted from the Phase 2 dictionary and Phase 3 table. Phase 5 documentation synchronization moved this attribute into `sql/02_create_dimensions.sql` and the design documents. The ETL now only populates it from the calendar date; it does not alter database structure.
 - The approved data dictionary specifies four decimal places for Sales and Profit. The raw Excel representations sum to `501239.89079999999149825` and `39706.36249999998025702`; after normalization to the database's four-decimal scale the totals are `501239.8908` and `39706.3625`. They are equal at the stored scale. Quantity remains exactly `8780`.
 
 ## Rerun and Transaction Safety
 
 Before loading, the script uses one `TRUNCATE` statement listing `FactSales` first, followed by all four dimensions. PostgreSQL requires the referencing fact and referenced dimensions to be truncated together while foreign keys exist. `RESTART IDENTITY` resets generated fact and dimension sequences. Dimensions are then copied before the fact rows.
 
-The `TRUNCATE`, weekend-column change, dimension copies, fact copy, and all reconciliation assertions execute in one transaction. A database error or failed assertion aborts the transaction, leaving the previously committed warehouse contents unchanged. Source extraction and validation happen before the transaction, so source problems do not touch the database.
+The `TRUNCATE`, dimension copies, fact copy, and all reconciliation assertions execute in one transaction. A database error or failed assertion aborts the transaction, leaving the previously committed warehouse contents unchanged. Source extraction and validation happen before the transaction, so source problems do not touch the database.
 
 The full ETL script was run twice successfully. Both runs reported the same row counts and measure totals; the second run replaced the first load rather than appending duplicates.
 
