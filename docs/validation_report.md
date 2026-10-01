@@ -4,7 +4,7 @@
 
 This phase performed checks only against the live `central_superstore_dw` warehouse. The Excel workbook was opened read-only; its SHA-256 remained `abf10f5a41b104af55c78c6fbeec156267abc373d5c885fecaf6c81324660acf`. The SQL validation file and Excel reconciliation script use `SELECT` statements and make no changes to the live data.
 
-For Task 0, the Phase 3 SQL scripts were also tested against a disposable clone named `central_superstore_phase5_check`, not against the live warehouse. The clone was rebuilt, ETL-loaded, validated, and then dropped. After cleanup, direct catalog counts on the live database remained: 2,323 facts, 1,464 dates, 629 customers, 1,326 product members, and 195 locations.
+The Phase 3 SQL scripts were tested against a disposable clone named `central_superstore_phase5_audit`, not against the live warehouse. The clone began as a copy of the live database, was rebuilt from the scripts, ETL-loaded twice from a fresh virtual environment, validated, and dropped. The DDL scripts also ran twice without a `warehouse_db` variable in a separate temporary PostgreSQL cluster, confirming the default database behavior without touching the live database.
 
 ## Task 0: Weekend Schema Source of Truth
 
@@ -14,17 +14,19 @@ Actual disposable-clone rebuild and reload results:
 
 | Step | Actual result |
 |---|---|
-| Create temporary clone from live database | `CREATE DATABASE` |
-| Run `01_create_database.sql` with `warehouse_db=central_superstore_phase5_check` | Connected to test database; `warehouse` schema already existed; no error |
-| Run `02_create_dimensions.sql` | Dropped dependent fact/dimensions in order; created four dimensions including `IsWeekend`; no error |
-| Run `03_create_fact.sql` | Created `FactSales`; no error |
-| Run `04_constraints.sql` | Added natural-key, foreign-key, and check constraints; no error |
-| Run ETL on the test database | 1,464 dates, 629 customers, 1,326 product members, 195 locations, 2,323 facts; totals and foreign keys passed |
+| Create temporary clone from live database | `CREATE DATABASE` using `central_superstore_dw` as the template |
+| Run `01_create_database.sql` twice with `warehouse_db=central_superstore_phase5_audit` | Connected to the clone both times; no error |
+| Run `02_create_dimensions.sql`, `03_create_fact.sql`, and `04_constraints.sql` twice | All scripts completed both rounds; tables and constraints were recreated without errors |
+| Run ETL twice from the fresh audit virtual environment | Both runs loaded 1,464 dates, 629 customers, 1,326 product members, 195 locations, and 2,323 facts; totals and foreign keys passed |
 | Run `05_validation.sql` on test database | 39 PASS, 0 FAIL |
-| Drop temporary test database | `DROP DATABASE`; subsequent catalog query returned 0 rows for its name |
+| Drop temporary test database | `DROP DATABASE`; clone removed after the checks |
 | Check live database afterward | 2,323 FactSales, 1,464 DimDate, 629 DimCustomer, 1,326 DimProduct, 195 DimLocation |
 
 This verifies that the canonical SQL definition can rebuild the schema and that the loader works without altering the schema. The populated live warehouse itself was not rebuilt or truncated.
+
+## Validation Check Limitations
+
+The 39 SQL checks returned 39 PASS on the live warehouse and on the rebuilt clone. Some checks are intentionally redundant with enforced schema constraints: `NOT NULL` checks, duplicate-key checks, orphan-key checks, and the quantity/sales/discount range checks cannot find a violating row while their corresponding constraints remain enabled and validated. They still document expected conditions and can expose damage if constraints are removed or bypassed. The SQL file displays `FAIL` in its result rows but does not convert a failed status into a nonzero `psql` exit code; inspect the result table when running it.
 
 ## SQL Validation Results
 

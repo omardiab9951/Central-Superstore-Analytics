@@ -1,37 +1,37 @@
 # Star Schema Data Dictionary
 
-Suggested PostgreSQL-compatible types are design recommendations only; no database objects are created in Phase 2. For source-backed columns, the “Excel source column” entry names the column in `Central_Superstore.xlsx`, sheet `Central_Region`. “Derived” means calculated from the source date rather than independently supplied in Excel.
+The PostgreSQL types below are the implemented types verified against the live `central_superstore_dw` catalog on 2026-10-01. Every listed column is `NOT NULL`; primary, foreign, and unique key roles are called out below. For source-backed columns, “Excel source column” names the column in `Central_Superstore.xlsx`, sheet `Central_Region`. “Derived” means calculated from the source date rather than independently supplied in Excel.
 
 ## `DimCustomer`
 
 One row per source customer ID. The profile confirms each ID maps to one name and one segment.
 
-| Column | Suggested type | Description | Key type | Excel source column |
+| Column | PostgreSQL type | Description | Key type | Excel source column |
 |---|---|---|---|---|
-| `CustomerKey` | `INTEGER` | Warehouse-assigned identifier for a customer dimension row. | PK; surrogate key | Not in Excel; generated later |
+| `CustomerKey` | `INTEGER` | Warehouse-assigned identity for a customer dimension row. | PK; surrogate key | Not in Excel; database identity |
 | `CustomerID` | `VARCHAR(20)` | Source customer identifier; unique within the observed dataset. | Natural/business key; unique | `Customer ID` |
 | `CustomerName` | `TEXT` | Customer's display name. | Descriptive attribute | `Customer Name` |
 | `Segment` | `VARCHAR(30)` | Customer segment label. | Descriptive attribute | `Segment` |
 
 ## `DimProduct`
 
-One row per exact observed `(ProductID, ProductName)` combination. Product category and sub-category are included as descriptive attributes. `ProductID` alone is not unique in this table because 16 IDs have more than one source name.
+One row per observed `(ProductID, ProductName)` combination after ETL outer-whitespace trimming. Product category and sub-category are included as descriptive attributes. `ProductID` alone is not unique in this table because 16 IDs have more than one source name.
 
-| Column | Suggested type | Description | Key type | Excel source column |
+| Column | PostgreSQL type | Description | Key type | Excel source column |
 |---|---|---|---|---|
-| `ProductKey` | `INTEGER` | Warehouse-assigned identifier for an observed product member. | PK; surrogate key | Not in Excel; generated later |
+| `ProductKey` | `INTEGER` | Warehouse-assigned identity for an observed product member. | PK; surrogate key | Not in Excel; database identity |
 | `ProductID` | `VARCHAR(30)` | Source product identifier; repeated for IDs with conflicting observed product names. | Part of composite natural/business key | `Product ID` |
-| `ProductName` | `TEXT` | Exact product label observed for the product ID. Preserve variants until an authoritative resolution is available. | Part of composite natural/business key | `Product Name` |
+| `ProductName` | `TEXT` | Product label after the ETL trims outer whitespace. Preserve distinct variants until an authoritative resolution is available. | Part of composite natural/business key | `Product Name` |
 | `Category` | `VARCHAR(50)` | High-level product grouping. | Descriptive attribute | `Category` |
 | `SubCategory` | `VARCHAR(50)` | Product grouping within the category. | Descriptive attribute | `Sub-Category` |
 
-Proposed alternate natural key: `(ProductID, ProductName)`. It is composite because it uses more than one column. The profile verifies category and sub-category consistency per `ProductID`; those fields are not needed to distinguish the observed name variants.
+Implemented composite unique key: `(ProductID, ProductName)`. It is composite because it uses more than one column. The profile verifies category and sub-category consistency per `ProductID`; those fields are not needed to distinguish the observed name variants.
 
 ## `DimDate`
 
 One row per calendar day from 2013-01-03 through 2017-01-05 inclusive, covering both source date roles.
 
-| Column | Suggested type | Description | Key type | Excel source column |
+| Column | PostgreSQL type | Description | Key type | Excel source column |
 |---|---|---|---|---|
 | `DateKey` | `INTEGER` | Deterministic `YYYYMMDD` key for the calendar date. | PK; derived calendar key | Derived from `FullDate` |
 | `FullDate` | `DATE` | Calendar date represented by the row. | Natural key; unique | `Order Date` and `Ship Date` |
@@ -47,11 +47,11 @@ The same `DateKey` is referenced by `FactSales.OrderDateKey` and `FactSales.Ship
 
 ## `DimLocation`
 
-One row per observed `(Country, State, City, PostalCode)` combination. The full tuple is the proposed natural key. Although postal codes uniquely map to locations in this snapshot, that uniqueness is not assumed to hold beyond this source extract.
+One row per observed `(Country, State, City, PostalCode)` combination. The full tuple is the implemented natural key. Although postal codes uniquely map to locations in this snapshot, that uniqueness is not assumed to hold beyond this source extract.
 
-| Column | Suggested type | Description | Key type | Excel source column |
+| Column | PostgreSQL type | Description | Key type | Excel source column |
 |---|---|---|---|---|
-| `LocationKey` | `INTEGER` | Warehouse-assigned identifier for a location row. | PK; surrogate key | Not in Excel; generated later |
+| `LocationKey` | `INTEGER` | Warehouse-assigned identity for a location row. | PK; surrogate key | Not in Excel; database identity |
 | `Country` | `VARCHAR(100)` | Country associated with the source location; the observed value is `United States`. | Part of composite natural/business key; descriptive attribute | `Country` |
 | `State` | `VARCHAR(100)` | State associated with the source location. | Part of composite natural/business key | `State` |
 | `City` | `VARCHAR(100)` | City associated with the source location. | Part of composite natural/business key | `City` |
@@ -62,9 +62,9 @@ One row per observed `(Country, State, City, PostalCode)` combination. The full 
 
 One row per product line within an order. It stores measures and keys to the descriptive dimensions, plus source identifiers and shipment mode.
 
-| Column | Suggested type | Description | Key type | Excel source column |
+| Column | PostgreSQL type | Description | Key type | Excel source column |
 |---|---|---|---|---|
-| `SalesKey` | `BIGINT` | Warehouse-assigned identifier for one fact row. | PK; surrogate key | Not in Excel; generated later |
+| `SalesKey` | `BIGINT` | Warehouse-assigned identity for one fact row. | PK; surrogate key | Not in Excel; database identity |
 | `SourceRowID` | `INTEGER` | Source row identifier retained for traceability; unique across the 2,323 rows in the profile. | Alternate unique key; source identifier | `Row ID` |
 | `OrderID` | `VARCHAR(30)` | Source order identifier; repeats across product lines in an order. | Natural/business order key; not unique in fact | `Order ID` |
 | `OrderDateKey` | `INTEGER` | Date the order was placed. | FK to `DimDate.DateKey` (order-date role) | `Order Date` (mapped to `DimDate`) |
@@ -78,6 +78,30 @@ One row per product line within an order. It stores measures and keys to the des
 | `Discount` | `NUMERIC(5,4)` | Discount rate for the line. Do not sum as an amount. | Measure; non-additive rate | `Discount` |
 | `Profit` | `NUMERIC(14,4)` | Profit or loss for the line. Negative values are present and valid for analysis. | Measure; additive | `Profit` |
 
+The implemented identity columns are `SalesKey`, `CustomerKey`, `ProductKey`, and `LocationKey` (`GENERATED BY DEFAULT AS IDENTITY`). `DateKey` is supplied deterministically in `YYYYMMDD` form; `IsWeekend` has the database default `FALSE` and the ETL supplies the correct derived value.
+
+## Implemented Constraints
+
+These key and check constraints were read from the live PostgreSQL catalog and agree with [04_constraints.sql](../sql/04_constraints.sql):
+
+| Table | Constraint | Columns or rule |
+|---|---|---|
+| `DimCustomer` | Primary key | `CustomerKey` |
+| `DimCustomer` | Unique | `CustomerID` |
+| `DimDate` | Primary key | `DateKey` |
+| `DimDate` | Unique | `FullDate` |
+| `DimProduct` | Primary key | `ProductKey` |
+| `DimProduct` | Unique | `(ProductID, ProductName)` |
+| `DimLocation` | Primary key | `LocationKey` |
+| `DimLocation` | Unique | `(Country, State, City, PostalCode)` |
+| `FactSales` | Primary key | `SalesKey` |
+| `FactSales` | Unique | `SourceRowID` |
+| `FactSales` | Unique | `(OrderID, ProductKey)` |
+| `FactSales` | Foreign keys | `CustomerKey`, `ProductKey`, `LocationKey`, `OrderDateKey`, and `ShipDateKey` reference their documented dimension primary keys. |
+| `FactSales` | Checks | `Quantity > 0`; `Sales >= 0`; `Discount` is between 0 and 1 inclusive. Negative `Profit` remains allowed. |
+
+The additional `UNIQUE (OrderID, ProductKey)` is a product-member rule and is not identical to uniqueness of the source `(Order ID, Product ID)` pair when a product ID has multiple observed names. Review this assumption before applying the schema to broader order-line data; see [audit_phases_1_to_5.md](audit_phases_1_to_5.md).
+
 ## Foreign-Key Map
 
 | Fact column | Referenced column | Relationship |
@@ -90,9 +114,9 @@ One row per product line within an order. It stores measures and keys to the des
 
 ## Source-Column Coverage
 
-Every one of the 21 Excel columns is represented once as source data in the proposed model, either directly on `FactSales` or in a dimension used by that fact:
+Every one of the 21 Excel columns is represented in the implemented model, either directly on `FactSales` or in a dimension used by that fact:
 
-| Source column | Proposed destination |
+| Source column | Implemented destination |
 |---|---|
 | `Row ID` | `FactSales.SourceRowID` |
 | `Order ID` | `FactSales.OrderID` |

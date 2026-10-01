@@ -2,9 +2,9 @@
 
 ## Purpose and Scope
 
-This document completes Phase 2 only: it records a proposed analytical model based on the findings in [dataset_profile.md](dataset_profile.md) and the additional read-only checks described below. It does not create a database, SQL tables, or ETL scripts, and it does not change the Excel workbook.
+This document records the Phase 2 model and the Phase 3 implementation that was audited against the live PostgreSQL catalog. The five warehouse tables and all of their columns are documented in [data_dictionary.md](data_dictionary.md); the catalog, key roles, nullability, and constraints matched the SQL scripts on 2026-10-01. The source workbook remains unchanged.
 
-The recommended database engine remains PostgreSQL, as specified in `plan.md`. Data types below are proposals for a later implementation phase, not executable schema definitions.
+The project uses PostgreSQL, as specified in `plan.md`. The data dictionary contains the implemented PostgreSQL data types; this document explains the model and relationships.
 
 ## Terms Used
 
@@ -29,9 +29,9 @@ The recommended database engine remains PostgreSQL, as specified in `plan.md`. D
 
 ### Grain
 
-One `FactSales` row represents **one product line within one order**, matching the preferred grain in `plan.md`.
+One `FactSales` row represents **one product line within one order**, matching the preferred grain in `plan.md` and the implemented fact table.
 
-The Phase 1 profile reports 2,323 rows and 2,323 unique `Row ID` values. A separate read-only check of the same source sheet confirmed that all 2,323 `(Order ID, Product ID)` pairs are also unique in this snapshot (zero duplicate pairs; maximum pair count is one). This supports the proposed grain for the supplied file. It does not prove that the pair must remain unique in future data: a later export could contain the same product on multiple lines of one order. Therefore, `Row ID` is retained as a unique source-row identifier, while the pair is a validated snapshot-level candidate key rather than the only row identity.
+The Phase 1 profile reports 2,323 rows and 2,323 unique `Row ID` values. A separate read-only check of the same source sheet confirmed that all 2,323 `(Order ID, Product ID)` pairs are also unique in this snapshot (zero duplicate pairs; maximum pair count is one). This supports the implemented grain for the supplied file. It does not prove that the pair must remain unique in future data: a later export could contain the same product on multiple lines of one order. Therefore, `Row ID` is retained as a unique source-row identifier, while the pair is a validated snapshot-level candidate key rather than the only row identity.
 
 The profile also reports that 575 orders span multiple rows (up to 10), and confirms that order-level customer, order date, ship date, and ship mode values are consistent within each order. Repeated `Order ID` values are therefore expected at this line grain.
 
@@ -45,9 +45,11 @@ The profile also reports that 575 orders span multiple rows (up to 10), and conf
 
 `Sales`, `Quantity`, and `Profit` can be summed across product lines. `Discount` is a rate and must not be added as though it were an amount; an average or a separately defined weighted calculation is more meaningful. The source has 741 negative-profit rows, so negative `Profit` values must remain valid facts rather than being discarded.
 
-`SalesKey` is the warehouse surrogate primary key for a fact row. `SourceRowID` preserves the source's unique `Row ID` for traceability and is a proposed alternate unique identifier. `OrderID` is a business order identifier, but it is not a fact-row key because it repeats across lines. No separate order dimension is proposed: the profile finds no within-order variation in customer, dates, or ship mode, and this source has no additional order-header attributes requiring a separate table.
+The implemented DDL also declares `UNIQUE (OrderID, ProductKey)`. This guards against repeating a product-dimension member within one order in this supplied snapshot. Because a `ProductID` can have multiple observed names, this constraint is not identical to uniqueness of the source `(Order ID, Product ID)` pair. `SourceRowID` remains the fact row's source-backed unique identifier. The extra order/member uniqueness rule is recorded as a decision point in [audit_phases_1_to_5.md](audit_phases_1_to_5.md).
 
-## Proposed Dimensions and Design Decisions
+`SalesKey` is the warehouse surrogate primary key for a fact row. `SourceRowID` preserves the source's unique `Row ID` for traceability and is implemented as an alternate unique key. `OrderID` is a business order identifier, but it is not a fact-row key because it repeats across lines. No separate order dimension is included: the profile finds no within-order variation in customer, dates, or ship mode, and this source has no additional order-header attributes requiring a separate table.
+
+## Dimensions and Design Decisions
 
 ### `DimCustomer`
 
@@ -57,7 +59,7 @@ The natural/business key is `CustomerID`; the warehouse key is `CustomerKey`. Th
 
 The warehouse key is `ProductKey`. The profile finds 1,310 distinct `Product ID` values, but 16 IDs map to multiple observed product names. Each ID maps to one category and one sub-category. Therefore, `ProductID` alone cannot identify one unambiguous product row without choosing or correcting a source name, and this design does not invent such a correction.
 
-Instead, define a product-dimension member as one exact observed `(ProductID, ProductName)` combination, with its observed `Category` and `SubCategory`. A read-only check found 1,326 distinct combinations of `(Product ID, Product Name, Category, Sub-Category)` in the source. `ProductID` is retained as a business identifier but is not unique in this dimension; the proposed natural key is `(ProductID, ProductName)`. Category and sub-category are consistent for each product ID according to the profile. Preserve exact source labels in this design; the profile also records four trailing-space occurrences in one product name. Any label cleanup or alias resolution requires an explicit later data-quality decision.
+Instead, define a product-dimension member as one observed `(ProductID, ProductName)` combination after the ETL's outer-whitespace trimming, with its observed `Category` and `SubCategory`. The source and the loaded dimension both contain 1,326 distinct product-member combinations; the ETL removes four trailing-space occurrences from one product-name label. `ProductID` is retained as a business identifier but is not unique in this dimension; the implemented natural key is `(ProductID, ProductName)`. Category and sub-category are consistent for each product ID according to the profile. Other distinct names are preserved without selecting an invented canonical product name.
 
 This is a deliberate source-preserving compromise. In a strict normalized catalog, the 16 conflicting identifiers would need authoritative resolution or a separate alias/history model. Until that evidence exists, splitting or selecting a preferred name would risk losing source facts. The flat product dimension keeps the observed product label beside each product member for straightforward reporting.
 
@@ -69,7 +71,7 @@ Use one calendar-day row per `FullDate`. The profile gives an order-date range o
 
 ### `DimLocation`
 
-The proposed natural key is the full source tuple `(Country, State, City, PostalCode)`; `LocationKey` is its surrogate key. Phase 1 found 195 postal codes. A read-only check found that each postal code maps to exactly one `(Country, City, State)` tuple in this particular dataset. However, four `(City, State)` pairs have multiple postal codes, so city and state alone are not sufficient to identify the location. Although postal code alone happens to identify the 195 observed tuples here, retaining the full tuple avoids assuming postal-code uniqueness outside this single-country snapshot and makes the source location definition explicit.
+The natural key is the full source tuple `(Country, State, City, PostalCode)`; `LocationKey` is its surrogate key. Phase 1 found 195 postal codes. A read-only check found that each postal code maps to exactly one `(Country, City, State)` tuple in this particular dataset. However, four `(City, State)` pairs have multiple postal codes, so city and state alone are not sufficient to identify the location. Although postal code alone happens to identify the 195 observed tuples here, retaining the full tuple avoids assuming postal-code uniqueness outside this single-country snapshot and makes the source location definition explicit.
 
 `Country` is `United States` throughout and `Region` is `Central` throughout, according to the profile. Keep both as location attributes so the source's geographic columns remain represented and reports can show their scope. Their constant values mean they add no variation within this dataset; they are not independent dimensions here.
 
@@ -89,7 +91,7 @@ Each dimension-to-fact relationship is one-to-many: one dimension member can be 
 | `DimDate.DateKey` | `FactSales.ShipDateKey` | Date the order was shipped |
 | `DimLocation.LocationKey` | `FactSales.LocationKey` | Source location associated with the order line |
 
-The two date foreign keys point to the same `DimDate` primary key but have different names and meanings. There are no dimension-to-dimension foreign keys, so the proposed design has no circular dependencies.
+The two date foreign keys point to the same `DimDate` primary key but have different names and meanings. There are no dimension-to-dimension foreign keys, so the implemented design has no circular dependencies.
 
 ## Normalization Check
 
@@ -103,11 +105,11 @@ The **first normal form (1NF)** idea is that each cell stores one value rather t
 | `DimLocation` | One row per observed `(Country, State, City, PostalCode)` tuple. The full tuple distinguishes locations; country and region are constant in this extract and retained for scope/context. |
 | `FactSales` | Measures and transaction-level attributes are stored at the declared line grain. Dimension descriptions are not copied into the fact; dimension foreign keys provide that context. `OrderID` and `SourceRowID` remain in the fact for order analysis and lineage. |
 
-All source fields are atomic in the proposed representation. No normalization change is recommended for customer, date, or location. Product-name conflicts are the one source issue that prevents a simple one-row-per-ProductID catalog; keep the observed variants distinct and review before any future canonicalization.
+All source fields are atomic in the implemented representation. No normalization change is recommended for customer, date, or location. Product-name conflicts are the one source issue that prevents a simple one-row-per-ProductID catalog; keep the observed variants distinct and review before any future canonicalization.
 
 ## Mermaid ERD
 
-The diagram uses `||` for exactly one referenced dimension row and `o{` for zero or many fact rows. PK and FK labels identify the key columns.
+The diagram uses `||` for exactly one referenced dimension row and `o{` for zero or many fact rows. PK and FK labels identify the key columns. It uses short logical type labels for readability; the data dictionary lists every implemented column with its exact PostgreSQL type, length/precision, and key role.
 
 ```mermaid
 erDiagram
@@ -168,7 +170,7 @@ erDiagram
 
 In `DimProduct`, the natural-key uniqueness is composite `(ProductID, ProductName)`; Mermaid's ERD notation does not show that composite constraint explicitly. In `DimLocation`, the source natural key is composite `(Country, State, City, PostalCode)`. See [data_dictionary.md](data_dictionary.md) for the full column-level mapping.
 
-## Design Assumptions for Later Phases
+## Implemented Design Assumptions
 
 - Use one fact row per source row/order line. `Row ID` is unique in the supplied snapshot and is preserved as `SourceRowID`.
 - The observed `(Order ID, Product ID)` pair is unique in this snapshot, but do not depend on it as the only fact-row identity in future exports.
@@ -178,14 +180,15 @@ In `DimProduct`, the natural-key uniqueness is composite `(ProductID, ProductNam
 - Treat `(Country, State, City, PostalCode)` as the location natural key; postal code alone is only verified as unique for this supplied extract.
 - Keep `ShipMode` in the fact table unless a later source supplies additional shipping-mode descriptions or attributes.
 - Keep `Country` and `Region` in `DimLocation` even though each is constant in this extract, so the 21 source columns are accounted for.
-- Use suggested PostgreSQL-compatible types in the data dictionary; validate precision and constraints during database implementation, which is outside Phase 2.
+- Use the implemented PostgreSQL types, precision, identity definitions, nullability, and constraints listed in the data dictionary and SQL files; these were compared with the live catalog.
 
-## Phase 2 Validation
+## Design and Implementation Validation
 
 - **Source fields accounted for:** all 21 source columns map to a dimension or fact column; none is dropped.
 - **Fact grain:** supported by 2,323 unique `Row ID` values and 2,323 distinct `(Order ID, Product ID)` pairs in the supplied snapshot.
-- **Foreign keys:** all five fact foreign-key columns point to the declared primary key of an existing dimension; the two date FKs point to `DimDate.DateKey` in separate roles.
+- **Foreign keys:** all five fact foreign-key columns point to the declared primary key of an existing dimension; the two date FKs point to `DimDate.DateKey` in separate roles. The live catalog contains all five foreign keys.
 - **Circular dependencies:** none; dimensions do not reference the fact or each other.
-- **Table count:** five proposed tables, meeting the assignment minimum of five.
+- **Table count:** five implemented tables with 37 documented columns, meeting the assignment minimum of five.
+- **Physical schema:** actual types, nullability, primary keys, foreign keys, unique constraints, and check constraints match [data_dictionary.md](data_dictionary.md) and `sql/01_create_database.sql` through `sql/04_constraints.sql`.
 - **Source workbook:** read-only checks only; it was not modified.
-- **Phase boundary:** no database, SQL table, or ETL implementation has been created.
+- **Audit evidence:** catalog and rerun results are recorded in [audit_phases_1_to_5.md](audit_phases_1_to_5.md).
